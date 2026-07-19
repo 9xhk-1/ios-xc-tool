@@ -8,13 +8,12 @@
 
 @property (nonatomic, strong) MTKView *metalView;
 @property (nonatomic, strong) id<MTLDevice> device;
-@property (nonatomic, assign) BOOL imguiReady;
+@property (nonatomic, assign) BOOL isReady;
 
 + (instancetype)shared;
-+ (void)initializeImGuiGlobal;
 
+- (void)setupImGuiAndMetal;
 - (void)show;
-- (void)hide;
-- (void)toggle;
+- (void)addLog:(NSString *)msg;
 
 @end
