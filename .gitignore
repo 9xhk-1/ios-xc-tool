@@ -1,5 +1,6 @@
 # Build output
 build/
+dist/
 
 # Dependencies (downloaded)
 deps/

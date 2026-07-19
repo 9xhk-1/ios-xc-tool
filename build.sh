@@ -6,7 +6,11 @@ SRC_DIR="${PROJECT_DIR}/src"
 DEPS_DIR="${PROJECT_DIR}/deps"
 IMGUI_DIR="${DEPS_DIR}/imgui"
 BUILD_DIR="${PROJECT_DIR}/build"
+INSTALL_NAME="${INSTALL_NAME:-@rpath/Tquic.framework/Tquic}"
 OUTPUT="${BUILD_DIR}/ios_xc_tool.dylib"
+
+# Show target
+echo "[*] Install name: ${INSTALL_NAME}"
 
 SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)
 if [ -z "$SDK_PATH" ]; then
@@ -59,7 +63,7 @@ xcrun --sdk iphoneos clang++ \
     -miphoneos-version-min="${MIN_IOS}" \
     ${INCLUDES} \
     -shared \
-    -install_name @rpath/ios_xc_tool.dylib \
+    -install_name "${INSTALL_NAME}" \
     -o "${OUTPUT}" \
     ${IMGUI_SOURCES} \
     ${OUR_SOURCES} \
@@ -76,7 +80,9 @@ echo "|  ${OUTPUT}"
 echo "+==============================================+"
 ls -lh "${OUTPUT}"
 echo ""
-echo "  To inject into an IPA:"
+echo "  install_name: ${INSTALL_NAME}"
+echo ""
+echo "  To inject via Framework replacement:"
 echo "  1. Unzip target.ipa"
 echo "  2. Copy dylib into App bundle"
 echo "  3. Use insert_dylib / optool to add load cmd"
