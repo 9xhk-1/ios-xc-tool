@@ -54,7 +54,7 @@
     return self;
 }
 
-- (void)setupImgui {
+- (void)setupImGui {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
