@@ -69,31 +69,27 @@
 }
 
 - (void)start {
-    // Force landscape — UIScreen.bounds is always portrait {768,1024} on iPad
     CGRect r = UIScreen.mainScreen.bounds;
     CGFloat W = MAX(r.size.width, r.size.height);
     CGFloat H = MIN(r.size.width, r.size.height);
     CGRect f = CGRectMake(0, 0, W, H);
 
     UIWindow *w = [[UIWindow alloc] initWithFrame:f];
-    w.backgroundColor = nil;
-    w.opaque = NO;
-    w.windowLevel = UIWindowLevelAlert + 100;
-    w.hidden = NO;
+    w.backgroundColor = nil; w.opaque = NO;
+    w.windowLevel = UIWindowLevelAlert + 100; w.hidden = NO;
 
-    self.frame = f;
-    _mtk.frame = self.bounds;
+    self.frame = f; _mtk.frame = self.bounds;
 
-    ImGui::GetIO().DisplaySize = ImVec2(_mtk.drawableSize.width, _mtk.drawableSize.height);
-    [self log:[NSString stringWithFormat:@"win %.0fx%.0f draw %.0fx%.0f scale %.1f",
-        W, H, _mtk.drawableSize.width, _mtk.drawableSize.height, self.contentScaleFactor]];
+    // Use bounds*scale for DisplaySize to match touch coords exactly
+    float s = self.contentScaleFactor;
+    ImGui::GetIO().DisplaySize = ImVec2(W*s, H*s);
+    [self log:[NSString stringWithFormat:@"win %.0fx%.0f ds %.0fx%.0f s %.1f", W, H, W*s, H*s, s]];
 
     [w addSubview:self];
     objc_setAssociatedObject(UIApplication.sharedApplication, "xc", w, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     [NSNotificationCenter.defaultCenter addObserver:self
-        selector:@selector(rot:)
-        name:UIDeviceOrientationDidChangeNotification object:nil];
+        selector:@selector(rot:) name:UIDeviceOrientationDidChangeNotification object:nil];
 }
 
 - (void)rot:(NSNotification*)n {
@@ -103,12 +99,9 @@
         CGFloat H = MIN(r.size.width, r.size.height);
         CGRect f = CGRectMake(0, 0, W, H);
         UIWindow *w = objc_getAssociatedObject(UIApplication.sharedApplication,"xc");
-        w.frame = f;
-        self.frame = f;
-        self->_mtk.frame = self.bounds;
-        ImGui::GetIO().DisplaySize = ImVec2(self->_mtk.drawableSize.width, self->_mtk.drawableSize.height);
-        [self log:[NSString stringWithFormat:@"rot %.0fx%.0f draw %.0fx%.0f", W, H,
-            self->_mtk.drawableSize.width, self->_mtk.drawableSize.height]];
+        w.frame = f; self.frame = f; self->_mtk.frame = self.bounds;
+        float s = self.contentScaleFactor;
+        ImGui::GetIO().DisplaySize = ImVec2(W*s, H*s);
     });
 }
 
@@ -128,9 +121,8 @@
 - (void)pt:(NSSet<UITouch*>*)ts dn:(BOOL)d {
     if (!_ok) return;
     CGPoint p = [ts.anyObject locationInView:self];
-    float sx = _mtk.drawableSize.width / self.bounds.size.width;
-    float sy = _mtk.drawableSize.height / self.bounds.size.height;
-    ImGui::GetIO().AddMousePosEvent(p.x * sx, p.y * sy);
+    float s = self.contentScaleFactor;
+    ImGui::GetIO().AddMousePosEvent(p.x*s, p.y*s);
     if (d) ImGui::GetIO().AddMouseButtonEvent(0,true);
 }
 - (void)pu:(NSSet<UITouch*>*)ts {
@@ -141,7 +133,9 @@
 #pragma mark - MTKView
 
 - (void)mtkView:(MTKView*)v drawableSizeWillChange:(CGSize)sz {
-    ImGui::GetIO().DisplaySize = ImVec2(sz.width, sz.height);
+    // Keep DisplaySize in sync: use bounds*scale, not raw drawableSize
+    float s = self.contentScaleFactor;
+    ImGui::GetIO().DisplaySize = ImVec2(self.bounds.size.width * s, self.bounds.size.height * s);
 }
 
 - (void)drawInMTKView:(MTKView*)v {
@@ -171,8 +165,8 @@
     CFTimeInterval n = CACurrentMediaTime();
     if (n-_t0 >= FPS_REFRESH_INTERVAL) { _fps=_ct/(n-_t0); _ct=0; _t0=n; }
 
-    float sw = _mtk.drawableSize.width;
-    float sh = _mtk.drawableSize.height;
+    float sw = ImGui::GetIO().DisplaySize.x;
+    float sh = ImGui::GetIO().DisplaySize.y;
     if (sw<=0)sw=2048; if (sh<=0)sh=1536;
 
     // FPS
