@@ -39,6 +39,7 @@
     _q = [_dev newCommandQueue];
 
     _mtk = [[MTKView alloc] initWithFrame:CGRectZero device:_dev];
+    _mtk.contentScaleFactor = UIScreen.mainScreen.scale;
     _mtk.delegate = self;
     _mtk.opaque = NO;
     _mtk.layer.opaque = NO;
@@ -69,23 +70,16 @@
 }
 
 - (void)start {
-    CGRect r = UIScreen.mainScreen.bounds;
-    CGFloat W = MAX(r.size.width, r.size.height);
-    CGFloat H = MIN(r.size.width, r.size.height);
-    CGRect f = CGRectMake(0, 0, W, H);
-
-    UIWindow *w = [[UIWindow alloc] initWithFrame:f];
-    w.backgroundColor = nil; w.opaque = NO;
-    w.windowLevel = UIWindowLevelAlert + 100; w.hidden = NO;
-
-    self.frame = f; _mtk.frame = self.bounds;
-
-    // Use bounds*scale for DisplaySize to match touch coords exactly
-    float s = self.contentScaleFactor;
-    ImGui::GetIO().DisplaySize = ImVec2(W*s, H*s);
-    [self log:[NSString stringWithFormat:@"win %.0fx%.0f ds %.0fx%.0f s %.1f", W, H, W*s, H*s, s]];
-
+    UIWindow *w = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    w.backgroundColor = nil;
+    w.opaque = NO;
+    w.windowLevel = UIWindowLevelAlert + 100;
+    w.hidden = NO;
     [w addSubview:self];
+
+    self.frame = w.bounds;
+    _mtk.frame = self.bounds;
+
     objc_setAssociatedObject(UIApplication.sharedApplication, "xc", w, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     [NSNotificationCenter.defaultCenter addObserver:self
@@ -94,19 +88,15 @@
 
 - (void)rot:(NSNotification*)n {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC), dispatch_get_main_queue(),^{
-        CGRect r = UIScreen.mainScreen.bounds;
-        CGFloat W = MAX(r.size.width, r.size.height);
-        CGFloat H = MIN(r.size.width, r.size.height);
-        CGRect f = CGRectMake(0, 0, W, H);
         UIWindow *w = objc_getAssociatedObject(UIApplication.sharedApplication,"xc");
-        w.frame = f; self.frame = f; self->_mtk.frame = self.bounds;
-        float s = self.contentScaleFactor;
-        ImGui::GetIO().DisplaySize = ImVec2(W*s, H*s);
+        w.frame = UIScreen.mainScreen.bounds;
+        self.frame = w.bounds;
+        _mtk.frame = self.bounds;
     });
 }
 
 - (void)log:(NSString*)m {
-    [_lg addObject:[NSString stringWithFormat:@"[%@] %@",
+    [_lg addObject:[NSString stringWithFormat:@"%@ %@",
         [NSDateFormatter localizedStringFromDate:NSDate.date dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterMediumStyle], m]];
     if (_lg.count>100) [_lg removeObjectAtIndex:0];
 }
@@ -121,7 +111,7 @@
 - (void)pt:(NSSet<UITouch*>*)ts dn:(BOOL)d {
     if (!_ok) return;
     CGPoint p = [ts.anyObject locationInView:self];
-    float s = self.contentScaleFactor;
+    float s = UIScreen.mainScreen.scale;
     ImGui::GetIO().AddMousePosEvent(p.x*s, p.y*s);
     if (d) ImGui::GetIO().AddMouseButtonEvent(0,true);
 }
@@ -133,9 +123,7 @@
 #pragma mark - MTKView
 
 - (void)mtkView:(MTKView*)v drawableSizeWillChange:(CGSize)sz {
-    // Keep DisplaySize in sync: use bounds*scale, not raw drawableSize
-    float s = self.contentScaleFactor;
-    ImGui::GetIO().DisplaySize = ImVec2(self.bounds.size.width * s, self.bounds.size.height * s);
+    ImGui::GetIO().DisplaySize = ImVec2(sz.width, sz.height);
 }
 
 - (void)drawInMTKView:(MTKView*)v {
@@ -167,13 +155,13 @@
 
     float sw = ImGui::GetIO().DisplaySize.x;
     float sh = ImGui::GetIO().DisplaySize.y;
-    if (sw<=0)sw=2048; if (sh<=0)sh=1536;
+    if (sw<=0) sw=UIScreen.mainScreen.bounds.size.width *UIScreen.mainScreen.scale;
+    if (sh<=0) sh=UIScreen.mainScreen.bounds.size.height*UIScreen.mainScreen.scale;
 
-    // FPS
     ImGui::SetNextWindowPos(ImVec2(10,10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.4f);
     if (ImGui::Begin("fps",0,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::TextColored(ImVec4(0,1,0,1), "%.0f FPS  %.0fx%.0f", _fps, sw, sh);
+        ImGui::TextColored(ImVec4(0,1,0,1), "%.0f FPS  %.0fx%.0f s:%.1f", _fps, sw, sh, UIScreen.mainScreen.scale);
         ImGui::End();
     }
 
@@ -193,7 +181,7 @@
     ImGui::SetNextWindowSize(ImVec2(mw,mh), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(20,60), ImGuiCond_FirstUseEver);
 
-    if (!ImGui::Begin("XC Tool", &_show, ImGuiWindowFlags_NoResize)) { ImGui::End(); return; }
+    if (!ImGui::Begin("XC Tool", &_show, 0)) { ImGui::End(); return; }
 
     if (ImGui::Button("_",ImVec2(36,0))) _mini=YES;
     ImGui::SameLine(); ImGui::TextUnformatted("v" APP_VERSION);
@@ -203,6 +191,7 @@
         if (ImGui::BeginTabItem("Home")) {
             ImGui::Text("Bundle: %s", NSBundle.mainBundle.bundleIdentifier.UTF8String?: "?");
             ImGui::Text("Device: %s", UIDevice.currentDevice.model.UTF8String?: "?");
+            ImGui::Text("ios: %s", UIDevice.currentDevice.systemVersion.UTF8String?: "?");
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Test")) {
