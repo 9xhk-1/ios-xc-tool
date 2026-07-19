@@ -12,20 +12,15 @@ echo "[*] Packaging Tquic.framework ..."
 
 # Clean dist
 rm -rf "${DIST_DIR}"
-mkdir -p "${DIST_DIR}/Versions/A"
+
+# Create directory structure first
+mkdir -p "${DIST_DIR}/Versions/A/Resources"
 
 # Copy dylib as framework binary
 cp "${BUILD_DIR}/ios_xc_tool.dylib" "${DIST_DIR}/Versions/A/${FW_NAME}"
 
-# Create symlinks (iOS framework layout)
-cd "${DIST_DIR}"
-ln -sf Versions/Current/${FW_NAME} "${FW_NAME}"
-ln -sf Versions/Current/Resources Resources
-ln -sf A Versions/Current
-mkdir -p Resources
-
-# Generate Info.plist
-cat > "${DIST_DIR}/Resources/Info.plist" << PLIST
+# Generate Info.plist (put it in the real dir, not a symlink)
+cat > "${DIST_DIR}/Versions/A/Resources/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
     "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -50,6 +45,12 @@ cat > "${DIST_DIR}/Resources/Info.plist" << PLIST
 </dict>
 </plist>
 PLIST
+
+# Create symlinks (must be done AFTER directories exist)
+cd "${DIST_DIR}"
+ln -sf A Versions/Current
+ln -sf Versions/Current/${FW_NAME} "${FW_NAME}"
+ln -sf Versions/Current/Resources Resources
 
 echo "[+] Framework packaged at: ${DIST_DIR}"
 find "${DIST_DIR}" -type f -o -type l | while read f; do
