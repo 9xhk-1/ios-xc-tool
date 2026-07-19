@@ -7,6 +7,7 @@
 @interface OverlayView : UIView <MTKViewDelegate>
 
 + (instancetype)shared;
+- (void)setupImGui;
 - (void)start;
 
 @end
