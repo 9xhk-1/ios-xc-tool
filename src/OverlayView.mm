@@ -16,6 +16,7 @@
 @property (nonatomic, assign) float testFloat;
 @property (nonatomic, assign) int testInt;
 @property (nonatomic, strong) NSMutableArray *logMessages;
+@property (nonatomic, assign) BOOL menuMinimized;
 @end
 
 @implementation OverlayView
@@ -29,10 +30,17 @@
     return instance;
 }
 
+- (CGSize)screenSize {
+    CGSize s = [UIScreen mainScreen].bounds.size;
+    return s;
+}
+
 - (instancetype)init {
-    self = [super initWithFrame:[UIScreen mainScreen].bounds];
+    CGSize sz = [self screenSize];
+    self = [super initWithFrame:CGRectMake(0, 0, sz.width, sz.height)];
     if (self) {
         _menuVisible = YES;
+        _menuMinimized = NO;
         _imguiReady = NO;
         _testBool = NO;
         _testFloat = 50.0f;
@@ -43,6 +51,8 @@
         _logMessages = [NSMutableArray array];
 
         self.backgroundColor = [UIColor clearColor];
+        self.multipleTouchEnabled = NO;
+        self.userInteractionEnabled = YES;
 
         _device = MTLCreateSystemDefaultDevice();
         if (!_device) return self;
@@ -50,6 +60,7 @@
         _commandQueue = [_device newCommandQueue];
 
         _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_device];
+        _metalView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         _metalView.backgroundColor = [UIColor clearColor];
         _metalView.delegate = self;
         _metalView.framebufferOnly = NO;
@@ -64,18 +75,32 @@
     return self;
 }
 
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    _metalView.frame = self.bounds;
+}
+
 - (void)initImGui {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize = ImVec2(self.bounds.size.width, self.bounds.size.height);
 
+    // Touch-friendly settings
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
     ImGui::StyleColorsDark();
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.ScaleAllSizes(1.5f);
+
+    ImFontConfig fontCfg;
+    fontCfg.SizePixels = 18.0f;
+    io.Fonts->AddFontDefault(&fontCfg);
 
     ImGui_ImplMetal_Init(_device);
 
     _imguiReady = YES;
-    [self addLog:@"ImGui + Metal initialized OK"];
+    [self addLog:[NSString stringWithFormat:@"Screen: %.0fx%.0f", self.bounds.size.width, self.bounds.size.height]];
 }
 
 - (void)show {
@@ -87,21 +112,32 @@
     self.frame = window.bounds;
     _metalView.frame = self.bounds;
 
+    ImGuiIO &io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(self.bounds.size.width, self.bounds.size.height);
+
     [window addSubview:self];
     objc_setAssociatedObject([UIApplication sharedApplication],
                              "ios_xc_tool_window",
                              window,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    // Observe rotation
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(orientationChanged:)
+                                                 name:UIDeviceOrientationDidChangeNotification
+                                               object:nil];
 }
 
-- (void)hide {
-    UIWindow *window = objc_getAssociatedObject([UIApplication sharedApplication], "ios_xc_tool_window");
-    window.hidden = YES;
-}
-
-- (void)toggle {
-    UIWindow *window = objc_getAssociatedObject([UIApplication sharedApplication], "ios_xc_tool_window");
-    window.hidden = !window.hidden;
+- (void)orientationChanged:(NSNotification *)note {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        UIWindow *w = objc_getAssociatedObject([UIApplication sharedApplication], "ios_xc_tool_window");
+        self.frame = [UIScreen mainScreen].bounds;
+        w.frame = self.frame;
+        self->_metalView.frame = self.bounds;
+        ImGuiIO &io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(self.bounds.size.width, self.bounds.size.height);
+    });
 }
 
 - (void)addLog:(NSString *)msg {
@@ -111,6 +147,46 @@
                                                             timeStyle:NSDateFormatterMediumStyle],
                              msg]];
     if (_logMessages.count > 100) [_logMessages removeObjectAtIndex:0];
+}
+
+#pragma mark - Touch forwarding to ImGui
+
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    if (!_imguiReady) return NO;
+    ImGuiIO &io = ImGui::GetIO();
+    return io.WantCaptureMouse || io.WantCaptureKeyboard;
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [self forwardTouches:touches phase:ImGuiMouseButton_Left down:YES];
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [self forwardTouches:touches phase:ImGuiMouseButton_Left down:NO];
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [self forwardTouchesUp:touches];
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [self forwardTouchesUp:touches];
+}
+
+- (void)forwardTouches:(NSSet<UITouch *> *)touches phase:(ImGuiMouseButton)button down:(BOOL)down {
+    UITouch *t = [touches anyObject];
+    CGPoint pt = [t locationInView:self];
+    ImGuiIO &io = ImGui::GetIO();
+    io.AddMousePosEvent(pt.x, pt.y);
+    if (down) io.AddMouseButtonEvent(0, true);
+}
+
+- (void)forwardTouchesUp:(NSSet<UITouch *> *)touches {
+    UITouch *t = [touches anyObject];
+    CGPoint pt = [t locationInView:self];
+    ImGuiIO &io = ImGui::GetIO();
+    io.AddMousePosEvent(pt.x, pt.y);
+    io.AddMouseButtonEvent(0, false);
 }
 
 #pragma mark - MTKViewDelegate
@@ -150,7 +226,7 @@
 - (void)renderMenu {
     if (!_menuVisible) return;
 
-    // ---- FPS Counter ----
+    // FPS Counter
     {
         _frameCount++;
         CFTimeInterval now = CACurrentMediaTime();
@@ -159,91 +235,110 @@
             _frameCount = 0;
             _lastFpsTime = now;
         }
-
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.5f);
         ImGui::Begin("FPS", nullptr,
             ImGuiWindowFlags_NoDecoration |
             ImGuiWindowFlags_AlwaysAutoResize |
             ImGuiWindowFlags_NoInputs);
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%.1f FPS", _fps);
+        ImGui::Text("FPS: %.1f", _fps);
         ImGui::End();
     }
 
-    // ---- Main Menu ----
-    {
-        ImGui::SetNextWindowSize(ImVec2(MENU_WIDTH, MENU_HEIGHT), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(MENU_POS_X, MENU_POS_Y), ImGuiCond_FirstUseEver);
+    // Minimized bar (show when collapsed)
+    if (_menuMinimized) {
+        ImGui::SetNextWindowPos(ImVec2(10, 60), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(200, 40), ImGuiCond_Always);
+        ImGui::Begin("##minibar", nullptr,
+            ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoSavedSettings);
+        ImGui::SetCursorPosX(10);
+        if (ImGui::Button("Show Menu", ImVec2(180, 0))) {
+            _menuMinimized = NO;
+        }
+        ImGui::End();
+        return;
+    }
 
-        ImGui::Begin("iOS XC Tool v" APP_VERSION, &_menuVisible);
+    // Main Menu
+    {
+        float w = self.bounds.size.width;
+        float h = self.bounds.size.height;
+        float mw = w * 0.45f;
+        float mh = h * 0.55f;
+        if (mw < 350) mw = 350;
+        if (mw > 600) mw = 600;
+        if (mh < 350) mh = 350;
+
+        ImGui::SetNextWindowSize(ImVec2(mw, mh), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
+
+        ImGui::Begin("iOS XC Tool", nullptr,
+            ImGuiWindowFlags_NoResize);
+
+        if (ImGui::Button("_")) _menuMinimized = YES;
+        ImGui::SameLine();
+        if (ImGui::Button("X")) _menuVisible = NO;
+        ImGui::SameLine();
+        ImGui::Text("v" APP_VERSION "  |  %.0fx%.0f", w, h);
+
+        ImGui::Separator();
 
         if (ImGui::BeginTabBar("MainTabs")) {
 
-            // --- Tab: Home ---
             if (ImGui::BeginTabItem("Home")) {
-                ImGui::TextWrapped("Welcome to iOS XC Tool !");
+                ImGui::TextWrapped("Welcome to iOS XC Tool!");
                 ImGui::Separator();
-                ImGui::Text("App name: %s", [[[NSBundle mainBundle] bundleIdentifier] UTF8String] ?: "unknown");
-                ImGui::Text("Device: %s", [[[UIDevice currentDevice] model] UTF8String] ?: "unknown");
-                ImGui::Text("iOS: %s", [[[UIDevice currentDevice] systemVersion] UTF8String] ?: "unknown");
+                ImGui::Text("Bundle: %s", [[[NSBundle mainBundle] bundleIdentifier] UTF8String] ?: "?");
+                ImGui::Text("Device: %s", [[[UIDevice currentDevice] model] UTF8String] ?: "?");
+                ImGui::Text("iOS: %s", [[[UIDevice currentDevice] systemVersion] UTF8String] ?: "?");
+                ImGui::Text("Screen: %.0fx%.0f", w, h);
                 ImGui::EndTabItem();
             }
 
-            // --- Tab: Test ---
             if (ImGui::BeginTabItem("Test")) {
-                ImGui::Text("This is the Test tab");
-                ImGui::Separator();
-
                 ImGui::Checkbox("Toggle me", &_testBool);
-                ImGui::SliderFloat("Float slider", &_testFloat, 0.0f, 100.0f, "%.1f");
-                ImGui::SliderInt("Int slider", &_testInt, 0, 100);
+                ImGui::SliderFloat("Float", &_testFloat, 0.0f, 100.0f, "%.1f");
+                ImGui::SliderInt("Int", &_testInt, 0, 100);
 
-                if (ImGui::Button("Click me")) {
+                if (ImGui::Button("Click me", ImVec2(120, 0))) {
                     [self addLog:@"Button clicked!"];
                     _testInt++;
                 }
-
                 ImGui::SameLine();
-                if (ImGui::Button("Reset")) {
+                if (ImGui::Button("Reset", ImVec2(120, 0))) {
                     _testFloat = 50.0f;
                     _testInt = 42;
                     _testBool = NO;
-                    [self addLog:@"Values reset"];
                 }
-
-                ImGui::Text("Bool: %s, Float: %.1f, Int: %d",
+                ImGui::Text("Bool: %s  Float: %.1f  Int: %d",
                     _testBool ? "YES" : "NO", _testFloat, _testInt);
-
                 ImGui::EndTabItem();
             }
 
-            // --- Tab: Log ---
             if (ImGui::BeginTabItem("Log")) {
-                ImGui::Text("Log messages (%lu)", (unsigned long)_logMessages.count);
+                ImGui::Text("Log (%lu)", (unsigned long)_logMessages.count);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Clear")) [_logMessages removeAllObjects];
                 ImGui::Separator();
-
                 ImGui::BeginChild("LogScroller", ImVec2(0, 0), true);
                 for (NSString *msg in _logMessages) {
                     ImGui::TextUnformatted([msg UTF8String]);
                 }
-
                 if (_logMessages.count > 0 && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
                     ImGui::SetScrollHereY(1.0f);
-
                 ImGui::EndChild();
                 ImGui::EndTabItem();
             }
 
-            // --- Tab: About ---
             if (ImGui::BeginTabItem("About")) {
-                ImGui::Text("iOS XC Tool");
-                ImGui::Text("Version: " APP_VERSION);
+                ImGui::Text("iOS XC Tool v" APP_VERSION);
                 ImGui::Separator();
-                ImGui::Text("Based on Dear ImGui v" IMGUI_VERSION);
-                ImGui::Text("Rendering: Metal");
+                ImGui::Text("ImGui v" IMGUI_VERSION " + Metal");
                 ImGui::Separator();
-                ImGui::TextWrapped("Injects an ImGui overlay into iOS apps.\n"
-                                   "Use as framework replacement or DYLD_INSERT_LIBRARIES.");
+                ImGui::TextWrapped("Injects into any iOS app at runtime.");
                 ImGui::EndTabItem();
             }
 
