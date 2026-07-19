@@ -1,0 +1,19 @@
+# Build output
+build/
+
+# Dependencies (downloaded)
+deps/
+
+# macOS
+.DS_Store
+
+# IDE
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# Temp
+/tmp/
+*.swp
+*.swo
+*~
