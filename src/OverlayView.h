@@ -8,6 +8,7 @@
 
 @property (nonatomic, strong) MTKView *metalView;
 @property (nonatomic, strong) id<MTLDevice> device;
+@property (nonatomic, assign) BOOL imguiReady;
 
 + (instancetype)shared;
 
