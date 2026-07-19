@@ -18,6 +18,9 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Install ldid (jailbreak sign tool)
+        run: brew install ldid
+
       - name: Download Dear ImGui
         run: bash setup.sh
 
@@ -27,20 +30,19 @@ jobs:
       - name: Package as Tquic.framework
         run: bash package_framework.sh
 
-      - name: Ad-hoc sign (bypass Library Validation)
+      - name: Jailbreak sign with ldid
         run: |
-          codesign -s - -f dist/Tquic.framework/Versions/A/Tquic 2>/dev/null || true
-          codesign -s - -f dist/Tquic.framework/Tquic 2>/dev/null || true
-          echo "[+] Signed with ad-hoc identity"
+          set -e
+          FW="dist/Tquic.framework"
+          ldid -S "${FW}/Versions/A/Tquic"
+          echo "[+] ldid sign: ${FW}/Versions/A/Tquic"
+          # verify
+          codesign -dvvv "${FW}/Versions/A/Tquic" 2>&1 | head -5
+          # also sign the symlink entry
+          ldid -S "${FW}/Tquic" 2>/dev/null || true
 
-      - name: Upload framework artifact
+      - name: Upload Tquic.framework (jailbreak ready)
         uses: actions/upload-artifact@v4
         with:
           name: Tquic.framework
           path: dist/Tquic.framework
-
-      - name: Upload ldid-signed artifact (for jailbreak)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Tquic-dylib-only
-          path: dist/Tquic.framework/Versions/A/Tquic

@@ -3,32 +3,23 @@ set -e
 
 FRAMEWORK_DIR="$(dirname "$0")/dist/Tquic.framework"
 DYLIB="${FRAMEWORK_DIR}/Versions/A/Tquic"
-SIGN_IDENTITY="${1:--}"
 
 if [ ! -f "${DYLIB}" ]; then
     echo "[-] Tquic dylib not found at ${DYLIB}"
-    echo "    Run ./build.sh && ./package_framework.sh first"
+    echo "    Run ./build.sh && ./package_framework.sh first (or download from CI)"
     exit 1
 fi
 
-echo "[*] Signing ${DYLIB} ..."
+echo "[*] Signing for jailbreak with ldid ..."
 
-if [ "${SIGN_IDENTITY}" = "-" ]; then
-    echo "    Using ad-hoc signature (works with jailbreak/AMFI bypass)"
-    codesign -s - -f "${DYLIB}"
-    codesign -s - -f "${FRAMEWORK_DIR}/Tquic" 2>/dev/null || true
-elif [ "${SIGN_IDENTITY}" = "ldid" ]; then
-    if ! command -v ldid &>/dev/null; then
-        echo "[-] ldid not found. Install: brew install ldid"
-        exit 1
-    fi
-    ldid -S "${DYLIB}"
-else
-    echo "    Using identity: ${SIGN_IDENTITY}"
-    codesign -f -s "${SIGN_IDENTITY}" "${DYLIB}"
-    codesign -f -s "${SIGN_IDENTITY}" "${FRAMEWORK_DIR}/Tquic" 2>/dev/null || true
+if ! command -v ldid &>/dev/null; then
+    echo "[-] ldid not found. Install: brew install ldid"
+    exit 1
 fi
 
-echo "[+] Signed successfully"
+ldid -S "${DYLIB}"
+ldid -S "${FRAMEWORK_DIR}/Tquic" 2>/dev/null || true
+
+echo "[+] Signed. Copy Tquic.framework into IPA and install."
 echo ""
-echo "  Verify:  codesign -dvvv ${FRAMEWORK_DIR}"
+echo "  Verify: ldid -e ${DYLIB}"
