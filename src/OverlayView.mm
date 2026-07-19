@@ -3,10 +3,12 @@
 #import "imgui.h"
 #import "imgui_impl_metal.h"
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 @interface OverlayView ()
 @property (nonatomic, assign) BOOL menuVisible;
 @property (nonatomic, assign) BOOL imguiReady;
+@property (nonatomic, strong) id<MTLCommandQueue> commandQueue;
 @property (nonatomic, assign) float fps;
 @property (nonatomic, assign) CFTimeInterval lastFpsTime;
 @property (nonatomic, assign) int frameCount;
@@ -44,6 +46,8 @@
 
         _device = MTLCreateSystemDefaultDevice();
         if (!_device) return self;
+
+        _commandQueue = [_device newCommandQueue];
 
         _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_device];
         _metalView.backgroundColor = [UIColor clearColor];
@@ -126,13 +130,19 @@
 
     ImGui::Render();
     ImDrawData *drawData = ImGui::GetDrawData();
-    if (drawData) {
-        id<MTLCommandBuffer> cmdBuf = [view.currentRenderPassDescriptor.colorAttachments[0].texture
-                                       newTextureViewWithPixelFormat:MTLPixelFormatBGRA8Unorm].newTextureView;
-        ImGui_ImplMetal_RenderDrawData(drawData,
-            (__bridge id<MTLCommandBuffer>)(__bridge void *)view.currentRenderPassDescriptor,
-            (__bridge id<MTLRenderCommandEncoder>)(__bridge void *)view.currentRenderPassDescriptor);
-    }
+    if (!drawData) return;
+
+    MTLRenderPassDescriptor *rpDesc = view.currentRenderPassDescriptor;
+    if (!rpDesc) return;
+
+    id<MTLCommandBuffer> cmdBuf = [_commandQueue commandBuffer];
+    id<MTLRenderCommandEncoder> encoder = [cmdBuf renderCommandEncoderWithDescriptor:rpDesc];
+
+    ImGui_ImplMetal_RenderDrawData(drawData, cmdBuf, encoder);
+
+    [encoder endEncoding];
+    [cmdBuf presentDrawable:view.currentDrawable];
+    [cmdBuf commit];
 }
 
 #pragma mark - Menu Rendering
