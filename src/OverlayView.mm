@@ -70,14 +70,17 @@
 }
 
 - (void)start {
-    UIWindow *w = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    CGRect r = UIScreen.mainScreen.bounds;
+    CGFloat W = MAX(r.size.width, r.size.height);
+    CGFloat H = MIN(r.size.width, r.size.height);
+    UIWindow *w = [[UIWindow alloc] initWithFrame:CGRectMake(0,0,W,H)];
     w.backgroundColor = nil;
     w.opaque = NO;
     w.windowLevel = UIWindowLevelAlert + 100;
     w.hidden = NO;
     [w addSubview:self];
 
-    self.frame = w.bounds;
+    self.frame = CGRectMake(0,0,W,H);
     _mtk.frame = self.bounds;
 
     objc_setAssociatedObject(UIApplication.sharedApplication, "xc", w, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -89,7 +92,10 @@
 - (void)rot:(NSNotification*)n {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,500*NSEC_PER_MSEC), dispatch_get_main_queue(),^{
         UIWindow *w = objc_getAssociatedObject(UIApplication.sharedApplication,"xc");
-        w.frame = UIScreen.mainScreen.bounds;
+        CGRect r = UIScreen.mainScreen.bounds;
+        CGFloat W = MAX(r.size.width, r.size.height);
+        CGFloat H = MIN(r.size.width, r.size.height);
+        w.frame = CGRectMake(0,0,W,H);
         self.frame = w.bounds;
         _mtk.frame = self.bounds;
     });
