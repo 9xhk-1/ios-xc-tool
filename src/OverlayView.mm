@@ -1,4 +1,5 @@
 #import "OverlayView.h"
+#import "Config.h"
 #import "imgui.h"
 #import "imgui_impl_metal.h"
 #import <UIKit/UIKit.h>
@@ -187,7 +188,7 @@
     if (!ImGui::Begin("XC Tool", &_show, ImGuiWindowFlags_NoResize)) { ImGui::End(); return; }
 
     if (ImGui::Button("_",ImVec2(36,0))) _mini=YES;
-    ImGui::SameLine(); ImGui::Text("v" APP_VERSION);
+    ImGui::SameLine(); ImGui::TextUnformatted("v" APP_VERSION);
     ImGui::Separator();
 
     if (ImGui::BeginTabBar("t")) {
