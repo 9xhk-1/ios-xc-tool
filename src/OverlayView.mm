@@ -17,6 +17,7 @@
 @property (nonatomic, assign) int testInt;
 @property (nonatomic, strong) NSMutableArray *logMessages;
 @property (nonatomic, assign) BOOL menuMinimized;
+@property (nonatomic, assign) BOOL touchDown;
 @end
 
 @implementation OverlayView
@@ -30,18 +31,13 @@
     return instance;
 }
 
-- (CGSize)screenSize {
-    CGSize s = [UIScreen mainScreen].bounds.size;
-    return s;
-}
-
 - (instancetype)init {
-    CGSize sz = [self screenSize];
-    self = [super initWithFrame:CGRectMake(0, 0, sz.width, sz.height)];
+    self = [super initWithFrame:CGRectZero];
     if (self) {
         _menuVisible = YES;
         _menuMinimized = NO;
         _imguiReady = NO;
+        _touchDown = NO;
         _testBool = NO;
         _testFloat = 50.0f;
         _testInt = 42;
@@ -59,7 +55,8 @@
 
         _commandQueue = [_device newCommandQueue];
 
-        _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_device];
+        CGRect screenRect = [UIScreen mainScreen].bounds;
+        _metalView = [[MTKView alloc] initWithFrame:screenRect device:_device];
         _metalView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         _metalView.backgroundColor = [UIColor clearColor];
         _metalView.delegate = self;
@@ -75,23 +72,22 @@
     return self;
 }
 
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    _metalView.frame = self.bounds;
-}
-
 - (void)initImGui {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(self.bounds.size.width, self.bounds.size.height);
 
-    // Touch-friendly settings
+    // Disable ini file (dylib has no writable dir)
+    ImGui::GetIO().IniFilename = NULL;
+
+    ImGuiIO &io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(_metalView.drawableSize.width, _metalView.drawableSize.height);
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     ImGui::StyleColorsDark();
     ImGuiStyle &style = ImGui::GetStyle();
     style.ScaleAllSizes(1.5f);
+    style.WindowRounding = 4.0f;
+    style.FrameRounding = 3.0f;
 
     ImFontConfig fontCfg;
     fontCfg.SizePixels = 18.0f;
@@ -100,20 +96,24 @@
     ImGui_ImplMetal_Init(_device);
 
     _imguiReady = YES;
-    [self addLog:[NSString stringWithFormat:@"Screen: %.0fx%.0f", self.bounds.size.width, self.bounds.size.height]];
+    [self addLog:[NSString stringWithFormat:@"Init: %.0fx%.0f drawable:%.0fx%.0f",
+        self.bounds.size.width, self.bounds.size.height,
+        _metalView.drawableSize.width, _metalView.drawableSize.height]];
 }
 
 - (void)show {
-    UIWindow *window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+    CGRect screen = [UIScreen mainScreen].bounds;
+    UIWindow *window = [[UIWindow alloc] initWithFrame:screen];
     window.windowLevel = OVERLAY_WINDOW_LEVEL;
     window.backgroundColor = [UIColor clearColor];
     window.hidden = NO;
+    window.userInteractionEnabled = YES;
 
-    self.frame = window.bounds;
+    self.frame = screen;
     _metalView.frame = self.bounds;
 
     ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(self.bounds.size.width, self.bounds.size.height);
+    io.DisplaySize = ImVec2(_metalView.drawableSize.width, _metalView.drawableSize.height);
 
     [window addSubview:self];
     objc_setAssociatedObject([UIApplication sharedApplication],
@@ -121,79 +121,73 @@
                              window,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    // Observe rotation
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(orientationChanged:)
                                                  name:UIDeviceOrientationDidChangeNotification
                                                object:nil];
+
+    [self addLog:[NSString stringWithFormat:@"Window: %.0fx%.0f", screen.size.width, screen.size.height]];
 }
 
 - (void)orientationChanged:(NSNotification *)note {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         UIWindow *w = objc_getAssociatedObject([UIApplication sharedApplication], "ios_xc_tool_window");
-        self.frame = [UIScreen mainScreen].bounds;
-        w.frame = self.frame;
+        CGRect s = [UIScreen mainScreen].bounds;
+        self.frame = s;
+        w.frame = s;
         self->_metalView.frame = self.bounds;
         ImGuiIO &io = ImGui::GetIO();
-        io.DisplaySize = ImVec2(self.bounds.size.width, self.bounds.size.height);
+        io.DisplaySize = ImVec2(self->_metalView.drawableSize.width, self->_metalView.drawableSize.height);
     });
 }
 
 - (void)addLog:(NSString *)msg {
     [_logMessages addObject:[NSString stringWithFormat:@"[%@] %@",
-                             [NSDateFormatter localizedStringFromDate:[NSDate date]
-                                                            dateStyle:NSDateFormatterNoStyle
-                                                            timeStyle:NSDateFormatterMediumStyle],
-                             msg]];
+        [NSDateFormatter localizedStringFromDate:[NSDate date]
+                                       dateStyle:NSDateFormatterNoStyle
+                                       timeStyle:NSDateFormatterMediumStyle], msg]];
     if (_logMessages.count > 100) [_logMessages removeObjectAtIndex:0];
 }
 
-#pragma mark - Touch forwarding to ImGui
-
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    if (!_imguiReady) return NO;
-    ImGuiIO &io = ImGui::GetIO();
-    return io.WantCaptureMouse || io.WantCaptureKeyboard;
-}
+#pragma mark - Touch forwarding
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self forwardTouches:touches phase:ImGuiMouseButton_Left down:YES];
+    _touchDown = YES;
+    UITouch *t = [touches anyObject];
+    CGPoint pt = [t locationInView:self];
+    ImGui::GetIO().AddMousePosEvent(pt.x, pt.y);
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self forwardTouches:touches phase:ImGuiMouseButton_Left down:NO];
+    UITouch *t = [touches anyObject];
+    CGPoint pt = [t locationInView:self];
+    ImGui::GetIO().AddMousePosEvent(pt.x, pt.y);
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self forwardTouchesUp:touches];
+    _touchDown = NO;
+    UITouch *t = [touches anyObject];
+    CGPoint pt = [t locationInView:self];
+    ImGui::GetIO().AddMousePosEvent(pt.x, pt.y);
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self forwardTouchesUp:touches];
+    _touchDown = NO;
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
 }
 
-- (void)forwardTouches:(NSSet<UITouch *> *)touches phase:(ImGuiMouseButton)button down:(BOOL)down {
-    UITouch *t = [touches anyObject];
-    CGPoint pt = [t locationInView:self];
-    ImGuiIO &io = ImGui::GetIO();
-    io.AddMousePosEvent(pt.x, pt.y);
-    if (down) io.AddMouseButtonEvent(0, true);
-}
-
-- (void)forwardTouchesUp:(NSSet<UITouch *> *)touches {
-    UITouch *t = [touches anyObject];
-    CGPoint pt = [t locationInView:self];
-    ImGuiIO &io = ImGui::GetIO();
-    io.AddMousePosEvent(pt.x, pt.y);
-    io.AddMouseButtonEvent(0, false);
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // Always return self so touches reach our methods, no deeper view
+    return self;
 }
 
 #pragma mark - MTKViewDelegate
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
-    ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(size.width, size.height);
+    ImGui::GetIO().DisplaySize = ImVec2(size.width, size.height);
 }
 
 - (void)drawInMTKView:(MTKView *)view {
@@ -221,12 +215,15 @@
     [cmdBuf commit];
 }
 
-#pragma mark - Menu Rendering
+#pragma mark - Menu
 
 - (void)renderMenu {
     if (!_menuVisible) return;
 
-    // FPS Counter
+    float sw = _metalView.drawableSize.width;
+    float sh = _metalView.drawableSize.height;
+
+    // FPS
     {
         _frameCount++;
         CFTimeInterval now = CACurrentMediaTime();
@@ -238,115 +235,87 @@
         ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.5f);
         ImGui::Begin("FPS", nullptr,
-            ImGuiWindowFlags_NoDecoration |
-            ImGuiWindowFlags_AlwaysAutoResize |
-            ImGuiWindowFlags_NoInputs);
-        ImGui::Text("FPS: %.1f", _fps);
+            ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
+        ImGui::Text("FPS: %.1f  %.0fx%.0f", _fps, sw, sh);
         ImGui::End();
     }
 
-    // Minimized bar (show when collapsed)
     if (_menuMinimized) {
         ImGui::SetNextWindowPos(ImVec2(10, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(200, 40), ImGuiCond_Always);
-        ImGui::Begin("##minibar", nullptr,
-            ImGuiWindowFlags_NoDecoration |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoSavedSettings);
-        ImGui::SetCursorPosX(10);
-        if (ImGui::Button("Show Menu", ImVec2(180, 0))) {
-            _menuMinimized = NO;
-        }
+        ImGui::SetNextWindowSize(ImVec2(220, 48), ImGuiCond_Always);
+        ImGui::Begin("##bar", nullptr,
+            ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        if (ImGui::Button("Show Menu", ImVec2(200, 30))) _menuMinimized = NO;
         ImGui::End();
         return;
     }
 
-    // Main Menu
-    {
-        float w = self.bounds.size.width;
-        float h = self.bounds.size.height;
-        float mw = w * 0.45f;
-        float mh = h * 0.55f;
-        if (mw < 350) mw = 350;
-        if (mw > 600) mw = 600;
-        if (mh < 350) mh = 350;
+    float mw = sw * 0.45f;
+    float mh = sh * 0.60f;
+    if (mw < 340) mw = 340;
+    if (mw > 560) mw = 560;
+    if (mh < 380) mh = 380;
 
-        ImGui::SetNextWindowSize(ImVec2(mw, mh), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(mw, mh), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(20, 60), ImGuiCond_FirstUseEver);
 
-        ImGui::Begin("iOS XC Tool", nullptr,
-            ImGuiWindowFlags_NoResize);
+    ImGui::Begin("iOS XC Tool", nullptr, ImGuiWindowFlags_NoResize);
 
-        if (ImGui::Button("_")) _menuMinimized = YES;
-        ImGui::SameLine();
-        if (ImGui::Button("X")) _menuVisible = NO;
-        ImGui::SameLine();
-        ImGui::Text("v" APP_VERSION "  |  %.0fx%.0f", w, h);
+    if (ImGui::Button("_", ImVec2(36, 0))) _menuMinimized = YES;
+    ImGui::SameLine();
+    if (ImGui::Button("X", ImVec2(36, 0))) _menuVisible = NO;
+    ImGui::SameLine();
+    ImGui::Text("v" APP_VERSION);
 
-        ImGui::Separator();
+    ImGui::Separator();
 
-        if (ImGui::BeginTabBar("MainTabs")) {
+    if (ImGui::BeginTabBar("tabs")) {
 
-            if (ImGui::BeginTabItem("Home")) {
-                ImGui::TextWrapped("Welcome to iOS XC Tool!");
-                ImGui::Separator();
-                ImGui::Text("Bundle: %s", [[[NSBundle mainBundle] bundleIdentifier] UTF8String] ?: "?");
-                ImGui::Text("Device: %s", [[[UIDevice currentDevice] model] UTF8String] ?: "?");
-                ImGui::Text("iOS: %s", [[[UIDevice currentDevice] systemVersion] UTF8String] ?: "?");
-                ImGui::Text("Screen: %.0fx%.0f", w, h);
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("Test")) {
-                ImGui::Checkbox("Toggle me", &_testBool);
-                ImGui::SliderFloat("Float", &_testFloat, 0.0f, 100.0f, "%.1f");
-                ImGui::SliderInt("Int", &_testInt, 0, 100);
-
-                if (ImGui::Button("Click me", ImVec2(120, 0))) {
-                    [self addLog:@"Button clicked!"];
-                    _testInt++;
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Reset", ImVec2(120, 0))) {
-                    _testFloat = 50.0f;
-                    _testInt = 42;
-                    _testBool = NO;
-                }
-                ImGui::Text("Bool: %s  Float: %.1f  Int: %d",
-                    _testBool ? "YES" : "NO", _testFloat, _testInt);
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("Log")) {
-                ImGui::Text("Log (%lu)", (unsigned long)_logMessages.count);
-                ImGui::SameLine();
-                if (ImGui::SmallButton("Clear")) [_logMessages removeAllObjects];
-                ImGui::Separator();
-                ImGui::BeginChild("LogScroller", ImVec2(0, 0), true);
-                for (NSString *msg in _logMessages) {
-                    ImGui::TextUnformatted([msg UTF8String]);
-                }
-                if (_logMessages.count > 0 && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-                    ImGui::SetScrollHereY(1.0f);
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-
-            if (ImGui::BeginTabItem("About")) {
-                ImGui::Text("iOS XC Tool v" APP_VERSION);
-                ImGui::Separator();
-                ImGui::Text("ImGui v" IMGUI_VERSION " + Metal");
-                ImGui::Separator();
-                ImGui::TextWrapped("Injects into any iOS app at runtime.");
-                ImGui::EndTabItem();
-            }
-
-            ImGui::EndTabBar();
+        if (ImGui::BeginTabItem("Home")) {
+            ImGui::Text("Bundle: %s", [[[NSBundle mainBundle] bundleIdentifier] UTF8String] ?: "?");
+            ImGui::Text("Device: %s", [[[UIDevice currentDevice] model] UTF8String] ?: "?");
+            ImGui::Text("iOS:   %s", [[[UIDevice currentDevice] systemVersion] UTF8String] ?: "?");
+            ImGui::Text("Screen: %.0fx%.0f", sw, sh);
+            ImGui::EndTabItem();
         }
 
-        ImGui::End();
+        if (ImGui::BeginTabItem("Test")) {
+            ImGui::Checkbox("Toggle", &_testBool);
+            ImGui::SliderFloat("Float", &_testFloat, 0.0f, 100.0f, "%.1f");
+            ImGui::SliderInt("Int", &_testInt, 0, 100);
+            if (ImGui::Button("Click me", ImVec2(-1, 40))) {
+                [self addLog:@"Clicked"]; _testInt++;
+            }
+            if (ImGui::Button("Reset", ImVec2(-1, 40))) {
+                _testFloat = 50.0f; _testInt = 42; _testBool = NO;
+            }
+            ImGui::Text("Bool:%s  Float:%.1f  Int:%d", _testBool?"yes":"no", _testFloat, _testInt);
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Log")) {
+            if (ImGui::SmallButton("Clear")) [_logMessages removeAllObjects];
+            ImGui::SameLine(); ImGui::Text("(%lu)", (unsigned long)_logMessages.count);
+            ImGui::Separator();
+            ImGui::BeginChild("log", ImVec2(0, 0), true);
+            for (NSString *m in _logMessages) ImGui::TextUnformatted([m UTF8String]);
+            if (_logMessages.count > 0 && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+                ImGui::SetScrollHereY(1.0f);
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("About")) {
+            ImGui::Text("iOS XC Tool v" APP_VERSION);
+            ImGui::Text("ImGui " IMGUI_VERSION " + Metal");
+            ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
     }
+
+    ImGui::End();
 }
 
 @end
