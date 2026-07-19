@@ -71,9 +71,9 @@
     _ok = YES;
 }
 
-- (NSString*)cfgPath{return[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES)[0]stringByAppendingPathComponent:"xc_config.json"];}
-- (void)loadConfig{NSData*d=[NSData dataWithContentsOfFile:[self cfgPath]];if(!d)return;NSDictionary*j=[NSJSONSerialization JSONObjectWithData:d options:0 error:nil];if(j["auto_shoot"])_as=[j["auto_shoot"]boolValue];}
-- (void)saveConfig{[@{"auto_shoot":@(_as)}writeToFile:[self cfgPath]atomically:YES];}
+- (NSString*)cfgPath{return[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES)[0]stringByAppendingPathComponent:@"xc_config.json"];}
+- (void)loadConfig{NSData*d=[NSData dataWithContentsOfFile:[self cfgPath]];if(!d)return;NSDictionary*j=[NSJSONSerialization JSONObjectWithData:d options:0 error:nil];if(j[@"auto_shoot"])_as=[j[@"auto_shoot"]boolValue];}
+- (void)saveConfig{[@{@"auto_shoot":@(_as)}writeToFile:[self cfgPath]atomically:YES];}
 - (void)start {
     CGRect r = UIScreen.mainScreen.bounds;
     CGFloat W = MAX(r.size.width, r.size.height);
