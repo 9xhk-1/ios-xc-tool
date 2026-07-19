@@ -6,14 +6,7 @@
 
 @interface OverlayView : UIView <MTKViewDelegate>
 
-@property (nonatomic, strong) MTKView *metalView;
-@property (nonatomic, strong) id<MTLDevice> device;
-@property (nonatomic, assign) BOOL isReady;
-
 + (instancetype)shared;
-
-- (void)setupImGuiAndMetal;
-- (void)show;
-- (void)addLog:(NSString *)msg;
+- (void)start;
 
 @end
