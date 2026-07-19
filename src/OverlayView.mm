@@ -3,9 +3,10 @@
 #import "imgui.h"
 #import "imgui_impl_metal.h"
 #import <UIKit/UIKit.h>
+#import "Cheat.h"
 #import <objc/runtime.h>
 
-@interface OverlayView ()
+@interface OverlayView () { BOOL _as; }
 @property (nonatomic, strong) id<MTLDevice> dev;
 @property (nonatomic, strong) MTKView *mtk;
 @property (nonatomic, strong) id<MTLCommandQueue> q;
@@ -29,7 +30,7 @@
 - (instancetype)init {
     self = [super init];
     _show = YES; _mini = NO; _ok = NO;
-    _b = NO; _f = 50; _iv = 42;
+    _b = NO; _f = 50; _iv = 42; _as = NO;
     _lg = [NSMutableArray array];
     self.userInteractionEnabled = YES;
     self.multipleTouchEnabled = NO;
@@ -66,9 +67,13 @@
     ImFontConfig fc; fc.SizePixels = 18;
     io.Fonts->AddFontDefault(&fc);
     ImGui_ImplMetal_Init(_dev);
+    [self loadConfig];
     _ok = YES;
 }
 
+- (NSString*)cfgPath{return[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES)[0]stringByAppendingPathComponent:"xc_config.json"];}
+- (void)loadConfig{NSData*d=[NSData dataWithContentsOfFile:[self cfgPath]];if(!d)return;NSDictionary*j=[NSJSONSerialization JSONObjectWithData:d options:0 error:nil];if(j["auto_shoot"])_as=[j["auto_shoot"]boolValue];}
+- (void)saveConfig{[@{"auto_shoot":@(_as)}writeToFile:[self cfgPath]atomically:YES];}
 - (void)start {
     CGRect r = UIScreen.mainScreen.bounds;
     CGFloat W = MAX(r.size.width, r.size.height);
@@ -134,6 +139,8 @@
 
 - (void)drawInMTKView:(MTKView*)v {
     if (!_ok) return;
+    ImGui::GetIO().DisplayFramebufferScale=ImVec2(2,2);
+    extern bool gAutoShoot; if(gAutoShoot) CheatTick();
     ImGui_ImplMetal_NewFrame(v.currentRenderPassDescriptor);
     ImGui::NewFrame();
     [self menu];
@@ -216,6 +223,11 @@
             for (NSString *m in _lg) ImGui::TextUnformatted(m.UTF8String);
             if (_lg.count>0&&ImGui::GetScrollY()>=ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1);
             ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+        if(ImGui::BeginTabItem("Cheat")){
+            extern bool gAutoShoot;
+            if(ImGui::Checkbox("Auto Shoot",&_as)){gAutoShoot=_as;[self saveConfig];}
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

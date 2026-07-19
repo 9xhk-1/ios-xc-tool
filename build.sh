@@ -44,6 +44,7 @@ IMGUI_SOURCES="
 OUR_SOURCES="
     ${SRC_DIR}/main.mm
     ${SRC_DIR}/OverlayView.mm
+    ${SRC_DIR}/Cheat.mm
 "
 
 INCLUDES="-I${IMGUI_DIR} -I${IMGUI_DIR}/backends -I${SRC_DIR}"
@@ -55,6 +56,7 @@ FRAMEWORKS="
     -framework QuartzCore
     -framework Foundation
     -framework CoreGraphics
+    -framework CoreMotion
 "
 
 xcrun --sdk iphoneos clang++ \
