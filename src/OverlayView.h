@@ -11,6 +11,7 @@
 @property (nonatomic, assign) BOOL imguiReady;
 
 + (instancetype)shared;
++ (void)initializeImGuiGlobal;
 
 - (void)show;
 - (void)hide;

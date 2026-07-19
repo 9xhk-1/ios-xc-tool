@@ -14,7 +14,8 @@
     UIView *hit = [super hitTest:point withEvent:event];
     if (hit == self || hit == self.overlayView || hit == self.overlayView.metalView) {
         if (!self.overlayView.imguiReady) return nil;
-        if (ImGui::GetIO().WantCaptureMouse) return self.overlayView;
+        // Safe: context created before window exists, always same thread as init
+        if (ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse) return self.overlayView;
         return nil;
     }
     return nil;
@@ -41,6 +42,18 @@
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{ instance = [[OverlayView alloc] init]; });
     return instance;
+}
+
+// Called immediately from constructor, before any UI
++ (void)initializeImGuiGlobal {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::GetIO().IniFilename = NULL;
+    ImGui::StyleColorsDark();
+    ImGuiStyle &style = ImGui::GetStyle();
+    style.ScaleAllSizes(1.5f);
+    style.WindowRounding = 4.0f;
+    style.FrameRounding = 3.0f;
 }
 
 - (instancetype)init {
@@ -78,34 +91,18 @@
         _metalView.userInteractionEnabled = NO;
 
         [self addSubview:_metalView];
+
+        // Metal backend init needs the already-created ImGui context
+        ImFontConfig fontCfg;
+        fontCfg.SizePixels = 18.0f;
+        ImGui::GetIO().Fonts->AddFontDefault(&fontCfg);
+        ImGui_ImplMetal_Init(_device);
+        _imguiReady = YES;
     }
     return self;
 }
 
-- (void)initImGui {
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-
-    ImGui::GetIO().IniFilename = NULL;
-    ImGuiIO &io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-    ImGui::StyleColorsDark();
-    ImGuiStyle &style = ImGui::GetStyle();
-    style.ScaleAllSizes(1.5f);
-    style.WindowRounding = 4.0f;
-    style.FrameRounding = 3.0f;
-
-    ImFontConfig fontCfg;
-    fontCfg.SizePixels = 18.0f;
-    io.Fonts->AddFontDefault(&fontCfg);
-
-    ImGui_ImplMetal_Init(_device);
-    _imguiReady = YES;
-}
-
 - (void)show {
-    // Force landscape frame: UIScreen.bounds is always portrait on iPad {768,1024}
     CGRect screen = [UIScreen mainScreen].bounds;
     CGFloat w = MAX(screen.size.width, screen.size.height);
     CGFloat h = MIN(screen.size.width, screen.size.height);
@@ -119,17 +116,13 @@
 
     self.frame = landscape;
     _metalView.frame = landscape;
-
-    // Set ImGui display size from actual drawable
-    [self.metalView layoutIfNeeded];
-    ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(landscape.size.width, landscape.size.height);
+    ImGui::GetIO().DisplaySize = ImVec2(w, h);
 
     [window addSubview:self];
     objc_setAssociatedObject([UIApplication sharedApplication],
                              "xc_overlay", window, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    [self addLog:[NSString stringWithFormat:@"Win:%.0fx%.0f", w, h]];
+    [self addLog:[NSString stringWithFormat:@"Win: %.0fx%.0f", w, h]];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(orientationChanged:)
@@ -161,23 +154,27 @@
 #pragma mark - Touch
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (!_imguiReady) return;
     CGPoint pt = [[touches anyObject] locationInView:self];
     ImGui::GetIO().AddMousePosEvent(pt.x, pt.y);
     ImGui::GetIO().AddMouseButtonEvent(0, true);
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (!_imguiReady) return;
     CGPoint pt = [[touches anyObject] locationInView:self];
     ImGui::GetIO().AddMousePosEvent(pt.x, pt.y);
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (!_imguiReady) return;
     CGPoint pt = [[touches anyObject] locationInView:self];
     ImGui::GetIO().AddMousePosEvent(pt.x, pt.y);
     ImGui::GetIO().AddMouseButtonEvent(0, false);
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (!_imguiReady) return;
     ImGui::GetIO().AddMouseButtonEvent(0, false);
 }
 
@@ -259,7 +256,7 @@
             ImGui::Text("Bundle: %s", [[[NSBundle mainBundle] bundleIdentifier] UTF8String] ?: "?");
             ImGui::Text("Device: %s", [[[UIDevice currentDevice] model] UTF8String] ?: "?");
             ImGui::Text("iOS:   %s", [[[UIDevice currentDevice] systemVersion] UTF8String] ?: "?");
-            ImGui::Text("Scr: %.0fx%.0f", sw, sh);
+            ImGui::Text("Screen: %.0fx%.0f", sw, sh);
             ImGui::EndTabItem();
         }
 
