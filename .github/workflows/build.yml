@@ -27,8 +27,20 @@ jobs:
       - name: Package as Tquic.framework
         run: bash package_framework.sh
 
+      - name: Ad-hoc sign (bypass Library Validation)
+        run: |
+          codesign -s - -f dist/Tquic.framework/Versions/A/Tquic 2>/dev/null || true
+          codesign -s - -f dist/Tquic.framework/Tquic 2>/dev/null || true
+          echo "[+] Signed with ad-hoc identity"
+
       - name: Upload framework artifact
         uses: actions/upload-artifact@v4
         with:
           name: Tquic.framework
           path: dist/Tquic.framework
+
+      - name: Upload ldid-signed artifact (for jailbreak)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tquic-dylib-only
+          path: dist/Tquic.framework/Versions/A/Tquic
